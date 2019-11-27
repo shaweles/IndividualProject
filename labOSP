@@ -1,0 +1,436 @@
+[bits 16]
+org 0x7c00 
+start:
+	call loader
+	cli
+	call setVesa
+	xor ax, ax
+	mov ss, ax
+	mov ds, ax
+	mov fs, ax
+	mov es, ax
+	mov gs, ax
+	mov sp, 0xfffc 
+	
+	lgdt[deskTable] 
+	
+	mov eax, cr0 
+	or eax, 1
+	mov cr0, eax
+	
+	jmp SEG_CODE:jump32
+ret
+
+loader:
+	mov ah, 2
+	mov al, 100
+	mov ch, 0
+	mov cl, 2
+	mov dh, 0
+	mov dl, 0x80
+	mov bx, 0x8000
+	int 0x13
+ret
+
+setVesa:
+	mov ax, 0x4f01
+	mov cx, 0x118
+	mov di, modebuf
+	int 0x10
+	mov ax, 0x4f02
+	mov bx, 0x118
+	or bx, 0x4000
+	int 0x10
+	mov eax, dword[modebuf+0x28]
+	mov dword[lfb], eax
+ret
+
+
+	[bits 32]
+jump32:
+	mov ax, SEG_DATA
+	mov ss, ax
+	mov ds, ax
+	mov fs, ax
+	mov gs, ax
+	mov es, ax
+	
+	mov edi, [lfb]
+		
+	jmp SEG_CODE:0x8000
+	jmp $ 
+ret
+
+startTable:
+nullD: 
+dd 0
+dd 0
+
+codeD: 
+dw 0xffff 
+dw 0 
+db 0 
+db 10011010b 
+db 11001111b 
+db 0  
+
+dataD:
+dw 0xffff
+dw 0
+db 0
+db 10010010b
+db 11001111b
+db 0
+
+modebuf dd 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+lfb dd 0
+
+endTable:
+
+deskTable:
+dw endTable-startTable
+dd startTable
+
+SEG_DATA equ dataD-startTable
+SEG_CODE equ codeD-startTable
+
+
+void outPixel(int x, int y, int *color);
+void setGlyph(int x, int y, char *glyph);
+void glyph_output(int x, int y, char *glyph);
+void print_text(int x, int y, char *text);
+void picture_output(int x, int y);
+int delay();
+int hitckey();
+int getScanCode();
+void out(unsigned short port, unsigned short data);
+void power_off();
+void clear();
+void video_adapter();
+void video_mode();
+
+int start(){
+	int i, j;
+	char hi[] = "HI";
+	print_text(510, 245, hi);
+	for(i = 0; i < 3; i++){
+		picture_output(470, 270);
+	}
+	
+	while(1){
+		clear();
+		char num1[] = "1";
+		char num2[] = "2";
+		
+		char adapt[] = "ADAPTER";
+		char vid[] = "VIDEO";
+		char mode[] = "MODE";
+		char e[] = "E";
+		char exit[] = "EXIT";
+		
+		print_text(20, 100, num1);
+		print_text(20, 135, num2);
+		
+		print_text(60, 100, adapt);
+		print_text(60, 135, vid);
+		print_text(180, 135, mode);
+		print_text(810, 10, e);
+		print_text(845, 10, exit);
+		
+		char case1[] = "1";
+		char case2[] = "2";
+		
+		int select = 1;
+		while (select != 0){
+			asm("xor eax, eax");
+			asm("out 0x64, al");
+			if(hitckey()&1 == 1){
+				switch(getScanCode()){
+					case 2: {
+							clear();
+							video_adapter();
+							print_text(810, 10, e);
+							print_text(845, 10, exit);
+							asm("xor eax, eax");
+							asm("out  0x60, al");
+							while(getScanCode() != 18);
+							select = 0;
+							break;
+							}
+					case 3: {
+							clear();
+							video_mode();
+							print_text(810, 10, e);
+							print_text(845, 10, exit);
+							asm("xor eax, eax");
+							asm("out  0x60, al");
+							while(getScanCode() != 18);
+							select = 0;
+							break;
+							}
+					case 18: {
+						clear();
+						power_off();
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
+void picture_output(int x, int y){
+	char *color = 0xaa00;
+	int x1 = x, y1 = y, i, j, itr1 = 3, itr2 = 3, pic = 0;
+	 
+	while(pic != 3)
+	{
+		for (i = 0; i < 35; i++)
+		{
+			while(itr2 != 0){
+				for(j = 0; j < 35; j++){
+					while(itr1 != 0){
+						outPixel(x1, y1, color);
+						x1++;
+						itr1--;
+					}
+					color += 4;
+					itr1 = 3;
+				}
+				x1 = x;
+				y1++;
+				color -= 140;
+				itr2--;
+			}
+			itr2 = 3;
+			color += 140;
+		}
+		int time1 = delay();
+		int time2 = 0;
+		while((time2 - time1) < 1)
+			time2 = delay();
+		
+		x1 = x;
+		y1 = y;
+		pic++;
+	} 
+		
+}
+
+void outPixel(int x, int y, int *color){
+	char *p;
+	asm ("mov dword [ebp-8], edi");
+	p+=(x*3+y*1024*3);
+	*(int*)p=*color;
+} 
+
+void setGlyph(int x, int y, char *glyph){
+	char *p;
+    asm("mov dword[ebp-8], edi");
+	p += (y*1024*3) + x*3;
+	if(*glyph != 0)
+		*(int*)p = 0xffffff;
+	else *(int*)p = 0;
+	
+}
+
+void glyph_output(int x, int y, char *glyph){
+	int iter1 = 3, iter2 = 3;
+	int buff_x = x;
+	
+	int i, j;
+	
+	for(i = 0; i < 7; ++i)
+	{
+		while(iter2 != 0)
+		{
+			for(j=0; j < 5;++j)
+			{
+				while (iter1!=0)
+				{
+					setGlyph(x, y, glyph);
+					++x;
+					--iter1;
+				}
+				iter1 = 3;
+				++glyph;
+			}
+			x = buff_x;
+			++y;
+			glyph -= 5;
+			--iter2;
+		}
+		iter2 = 3;
+		glyph += 5;
+	}
+}
+
+int alphabet(char text, char *glyph){
+	switch(text){
+		case '0': return glyph; 
+		case '1': return glyph + 35; 
+		case '2': return glyph + 70;
+		case '3': return glyph + 105;
+	}
+	switch(text){
+		case '4': return glyph + 140;
+		case '5': return glyph + 175;
+		case '6': return glyph + 210;
+		case '7': return glyph + 245;
+	}
+	switch(text){
+		case '8': return glyph + 280;
+		case '9': return glyph + 315;
+		case 'A': return glyph + 350;
+		case 'B': return glyph + 385;
+	}
+	switch(text){
+		case 'C': return glyph + 420;
+		case 'D': return glyph + 455;
+		case 'E': return glyph + 490;
+		case 'F': return glyph + 525;
+	}
+	switch(text){
+		case 'G': return glyph + 560;
+		case 'H': return glyph + 595;
+		case 'I': return glyph + 630;
+	}
+	switch(text){
+		case 'J': return glyph + 665;
+		case 'K': return glyph + 700;
+		case 'L': return glyph + 735;
+		case 'M': return glyph + 770;
+	}
+	switch(text){
+		case 'N': return glyph + 805;
+		case 'O': return glyph + 840;
+		case 'P': return glyph + 875;
+		case 'Q': return glyph + 910;
+	}
+	switch(text){
+		case 'R': return glyph + 945;
+		case 'S': return glyph + 980;
+		case 'T': return glyph + 1015;
+		case 'U': return glyph + 1050;
+	}
+	switch(text){
+		case 'V': return glyph + 1085;
+		case 'W': return glyph + 1120;
+		case 'X': return glyph + 1155;
+		case 'Y': return glyph + 1190;
+	}
+	switch(text){
+		case 'Z': return glyph + 1225;
+		case ' ': return glyph + 1470;
+		case '(': return glyph + 1260;
+		case ')': return glyph + 1295;
+	}
+	switch(text){
+		case '.': return glyph + 1365;
+		case ',': return glyph + 1400;
+		case '-': return glyph + 1330;
+		case '!': return glyph + 1435;
+	}
+}
+
+void print_text(int x, int y, char *text){
+	int i;
+	char *glyph = 0xa300;
+	for (i=0; text[i]; i++){
+		glyph = alphabet(text[i], 0xa300);
+		glyph_output(x, y, glyph);
+		x += 20;
+	}
+}
+
+int delay(){
+	int a = 0, b = 0;
+	
+	asm("mov al, 0");
+	asm("out 0x70, al");
+	asm("in al, 0x71");
+	
+	asm("mov ah, al");
+	asm("shr ah, 4");
+	asm("and al, 0xF");	
+	asm("mov byte ptr[bp-0x4], ah");
+	asm("mov byte ptr[bp-0x8], al");
+	
+	return a*16+b;
+}
+
+int hitckey(){
+	int a = 0;
+	asm("xor eax, eax");
+	asm("in al, 0x64");
+	asm("mov byte ptr[bp - 0x4], al");
+	return a;
+}
+
+int getScanCode(){
+	int a = 0;
+	asm("xor eax, eax");
+	asm("in al, 0x60");
+	asm("mov byte ptr[bp - 0x4], al");
+	return a;
+}
+
+void out(unsigned short port, unsigned short data){
+	asm("outw %w1, %w0" : : "a" (data), "Nd" (port));
+}
+
+void power_off(){
+	asm("cli");
+	out(0xB004, 0x2000);
+	asm("cli; hlt");
+}
+
+void clear(){
+	int x = 0, i;
+	for (i = 0; i < 1024*768; ++i)
+	{
+		outPixel(x, 0, 0xa9a0);
+		++x;
+	}
+}
+
+void video_adapter(){
+	asm("mov al, 0x14");
+	asm("out 0x70, al");
+	asm("in al, 0x71");
+	unsigned char type = 0;
+	asm("mov [ebp-1], al");
+	type = type & 48;
+	type = type >> 4;
+	char type0[] = "VGA";
+	char type1[] = "40X25";
+	char type2[] = "80X25"; 
+	char type12[] = "VGA-CGA";
+	char type3[] = "MONOC";
+	char type4[] = "HROME";
+	
+	switch(type){
+		case 0: print_text(10, 10, type0); break;
+		case 1: print_text(10, 10, type1); print_text(130, 10, type12); break;
+		case 2: print_text(10, 10, type2); print_text(130, 10, type12); break;
+		case 3: print_text(10, 10, type3); print_text(110, 10, type4); break;
+	}
+}
+
+void video_mode(){
+	asm("mov al, 6");
+	asm("mov dx, 0x3ce");
+	asm("out dx, al");
+	asm("mov dx, 0x3cf");
+	asm("in al, dx"); 
+	unsigned char type = 0;
+	asm("mov [ebp-1], al");
+	type = type & 1; 
+	char type0[] = "TEXT";
+	char type1[] = "GRAPHIC";
+	char mode[] = "MODE";
+	switch(type){
+		case 0: print_text(10, 10, type0); print_text(95, 10, mode); break;
+		case 1: print_text(10, 10, type1); print_text(165, 10, mode); break;
+	}
+}
